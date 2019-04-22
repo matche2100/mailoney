@@ -21,10 +21,10 @@ import mailoney
 output_lock = threading.RLock()
 hpc,hpfeeds_prefix = mailoney.connect_hpfeeds()
 
-def log_to_file(file_path, ip, port, data):
+def log_to_file(file_path, ip, port, data, sessionid="-"):
     with output_lock:
         with open(file_path, "a") as f:
-            message = "[{0}][{1}:{2}] {3}".format(time.time(), ip, port, data.encode("string-escape"))
+            message = "[{0}][{1}][{2}:{3}] {4}".format(time.time(), sessionid, ip, port, data.encode("string-escape"))
             print file_path + " " + message
             f.write(message + "\n")
 
@@ -34,17 +34,17 @@ def log_to_hpfeeds(channel, data):
             hpfchannel=hpfeeds_prefix+"."+channel
             hpc.publish(hpfchannel, message)
 
-def process_packet_for_shellcode(packet, ip, port):
+def process_packet_for_shellcode(packet, ip, port, sessionid="-"):
     if libemu is None:
         return
     emulator = libemu.Emulator()
     r = emulator.test(packet)
     if r is not None:
         # we have shellcode
-        log_to_file(mailoney.logpath+"/shellcode.log", ip, port, "We have some shellcode")
+        log_to_file(mailoney.logpath+"/shellcode.log", ip, port, "We have some shellcode", sessionid=sessionid)
         #log_to_file(mailoney.logpath+"/shellcode.log", ip, port, emulator.emu_profile_output)
         #log_to_hpfeeds("/shellcode", ip, port, emulator.emu_profile_output)
-        log_to_file(mailoney.logpath+"/shellcode.log", ip, port, packet)
+        log_to_file(mailoney.logpath+"/shellcode.log", ip, port, packet, sessionid=sessionid)
         log_to_hpfeeds("shellcode",  json.dumps({ "Timestamp":format(time.time()), "ServerName": self.__fqdn, "SrcIP": self.__addr[0], "SrcPort": self.__addr[1],"Shellcode" :packet}))
 
 
@@ -71,7 +71,13 @@ class SMTPChannel(asynchat.async_chat):
         self.__rcpttos = []
         self.__data = ''
         from mailoney import srvname
+        from mailoney import banner
+        from mailoney import date_option
         self.__fqdn = srvname
+
+        from uuid import uuid4
+        self.__sessionid = str(uuid4())
+
         try:
             self.__peer = conn.getpeername()
         except socket.error, err:
@@ -82,7 +88,21 @@ class SMTPChannel(asynchat.async_chat):
                 raise
             return
         #print >> DEBUGSTREAM, 'Peer:', repr(self.__peer)
-        self.push('220 %s %s' % (self.__fqdn, __version__))
+        bannerstr = self.__fqdn
+        if banner is not None:
+            bannerstr += " " + banner.strip()
+        else:
+            bannerstr += " ESMTP Exim 4.69 #1"
+
+        if date_option:
+            import datetime
+            from pytz import timezone
+            #dt = datetime.datetime.now(tzinfo=datetime.timezone.utc)
+            dt = datetime.datetime.now(timezone('UTC'))
+            bannerstr += " " + dt.strftime('%a, %d %b %Y %H:%M:%S %z')
+
+        self.push('220 %s' % bannerstr) 
+        #self.push('220 %s %s' % (self.__fqdn, __version__))
         self.set_terminator('\r\n')
 
     # Overrides base class for convenience
@@ -95,13 +115,13 @@ class SMTPChannel(asynchat.async_chat):
         self.__rolling_buffer += data
         if len(self.__rolling_buffer) > 1024 * 1024:
             self.__rolling_buffer = self.__rolling_buffer[len(self.__rolling_buffer) - 1024 * 1024:]
-        process_packet_for_shellcode(self.__rolling_buffer, self.__addr[0], self.__addr[1])
+        process_packet_for_shellcode(self.__rolling_buffer, self.__addr[0], self.__addr[1], sessionid=self.__sessionid)
         del data
 
     # Implementation of base class abstract method
     def found_terminator(self):
         line = EMPTYSTRING.join(self.__line)
-        log_to_file(mailoney.logpath+"/commands.log", self.__addr[0], self.__addr[1], line.encode('string-escape'))
+        log_to_file(mailoney.logpath+"/commands.log", self.__addr[0], self.__addr[1], line.encode('string-escape'), sessionid=self.__sessionid)
         log_to_hpfeeds("commands",  json.dumps({ "Timestamp":format(time.time()), "ServerName": self.__fqdn, "SrcIP": self.__addr[0], "SrcPort": self.__addr[1],"Commmand" : line.encode('string-escape')}))
 
         #print >> DEBUGSTREAM, 'Data:', repr(line)
@@ -278,7 +298,7 @@ class SMTPServer(asyncore.dispatcher):
         self.close()
 
     # API for "doing something useful with the message"
-    def process_message(self, peer, mailfrom, rcpttos, data):
+    def process_message(self, peer, mailfrom, rcpttos, data, sessionid):
         """Override this abstract method to handle messages from the client.
 
         peer is a tuple containing (ipaddr, port) of the client that made the
@@ -308,14 +328,14 @@ def module():
 
     class SchizoOpenRelay(SMTPServer):
 
-        def process_message(self, peer, mailfrom, rcpttos, data):
+        def process_message(self, peer, mailfrom, rcpttos, data, sessionid):
             #setup the Log File
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], '')
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], '*' * 50)
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Mail from: {0}'.format(mailfrom))
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Mail to: {0}'.format(", ".join(rcpttos)))
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Data:')
-            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], data)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], '', sessionid=sessionid)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], '*' * 50, sessionid=sessionid)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Mail from: {0}'.format(mailfrom), sessionid=sessionid)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Mail to: {0}'.format(", ".join(rcpttos)), sessionid=sessionid)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], 'Data:', sessionid=sessionid)
+            log_to_file(mailoney.logpath+"/mail.log", peer[0], peer[1], data, sessionid=sessionid)
 
             loghpfeeds = {}
             loghpfeeds['ServerName'] = mailoney.srvname

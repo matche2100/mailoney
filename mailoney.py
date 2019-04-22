@@ -20,6 +20,8 @@ parser.add_argument('-p',action='store', metavar='<port>',  default='25', help='
 parser.add_argument('-s',action='store', metavar='mailserver', default=os.environ.get('MAILSERVER_NAME', None), help='A Name that\'ll show up as the mail server name')
 parser.add_argument('-t',action='store', choices=['open_relay', 'postfix_creds', 'schizo_open_relay'], required=True, help='honeypot type')
 parser.add_argument('-logpath',action='store', metavar='<logpath>',  default=os.environ.get('LOGPATH'), help='path for file logging')
+parser.add_argument('-d',action='store_true', help='adds the date string to end of banner' )
+parser.add_argument('-b',action='store', metavar='<banner>', default=None, help='The bannar after servername')
 parser.add_argument('-hpfserver', action='store', metavar='<hpfeeds-server>', default=os.environ.get('HPFEEDS_SERVER', None), help='HPFeeds Server')
 parser.add_argument('-hpfport', action='store', metavar='<hpfeeds-port>', default=os.environ.get('HPFEEDS_PORT', None), help='HPFeeds Port')
 parser.add_argument('-hpfident', action='store', metavar='<hpfeeds-ident>', default=os.environ.get('HPFEEDS_IDENT', None), help='HPFeeds Username')
@@ -37,6 +39,8 @@ if args.logpath:
 bind_ip = args.i
 bind_port = int(args.p)
 srvname = args.s
+banner = args.b
+date_option = args.d
 
 def connect_hpfeeds():
     # set hpfeeds related data
